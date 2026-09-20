@@ -1,0 +1,935 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pair-Raught</title>
+<style>
+  :root {
+    --bg: #fbfbfc; --card: #fff; --line: #e3e5ea; --ink: #1b1d21;
+    --dim: #676c76; --accent: #2f6feb; --ok: #12833a; --bad: #c3352b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16181c; --card:#1d2025; --line:#2c3037; --ink:#e9eaec;
+            --dim:#9aa0aa; --accent:#5b8def; --ok:#4cc47c; --bad:#f0776c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+  main { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+  h1 { font-size:1.35rem; margin:0 0 .25rem; }
+  .sub { color:var(--dim); margin:0 0 1.5rem; }
+  .bar { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;
+         margin-bottom:1.5rem; }
+  button { font:inherit; padding:.5rem .9rem; border:1px solid var(--line);
+           background:var(--card); color:var(--ink); border-radius:.45rem;
+           cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.45; cursor:default; }
+  .status { color:var(--dim); font-size:.9rem; }
+  .status.ok { color:var(--ok); } .status.bad { color:var(--bad); }
+  section { background:var(--card); border:1px solid var(--line);
+            border-radius:.6rem; padding:1rem 1.1rem; margin-bottom:1rem; }
+  section h2 { font-size:1rem; margin:0 0 .2rem; }
+  section .why { color:var(--dim); font-size:.87rem; margin:0 0 .9rem; }
+  .row { display:grid; grid-template-columns:1fr auto; gap:.75rem;
+         align-items:center; padding:.45rem 0; border-top:1px solid var(--line); }
+  .row:first-of-type { border-top:0; }
+  .row .hint { color:var(--dim); font-size:.83rem; }
+  .ctl { display:flex; align-items:center; gap:.6rem; }
+  input[type=number], select { font:inherit; padding:.35rem .5rem;
+    border:1px solid var(--line); border-radius:.35rem;
+    background:var(--bg); color:var(--ink); }
+  input[type=number] { width:5.5rem; }
+  select { width:9rem; }
+  input[type=range] { width:11rem; accent-color:var(--accent); }
+  input[type=checkbox] { width:1.15rem; height:1.15rem; accent-color:var(--accent); }
+  input[type=color] { width:3rem; height:2rem; padding:0; border:1px solid var(--line);
+    border-radius:.35rem; background:var(--bg); cursor:pointer; }
+
+  /* Status panel: facts about the puck, not settings. */
+  .facts { display:grid; grid-template-columns:auto 1fr; gap:.35rem 1rem;
+           font-size:.92rem; }
+  .facts dt { color:var(--dim); }
+  .facts dd { margin:0; }
+  .dot { display:inline-block; width:.55rem; height:.55rem; border-radius:50%;
+         background:var(--dim); margin-right:.4rem; }
+  .dot.on { background:var(--ok); } .dot.off { background:var(--bad); }
+  .actions { display:flex; gap:.6rem; flex-wrap:wrap; margin-top:1rem;
+             padding-top:.9rem; border-top:1px solid var(--line); }
+
+  .empty { color:var(--dim); text-align:center; padding:3rem 1rem; }
+  .hide { display:none; }
+  footer { color:var(--dim); font-size:.85rem; margin-top:1.5rem; }
+
+  /* Chime editor: one line per note, wrapping on a narrow screen. */
+  .notes { display:flex; flex-direction:column; gap:.4rem; margin:.6rem 0; }
+  .note { display:flex; gap:.4rem; align-items:center; flex-wrap:wrap; }
+  .note .idx { color:var(--dim); font-size:.85rem; min-width:1.4rem; text-align:right; }
+  .note select { width:5.2rem; }
+  .note select.chan { width:8.5rem; }
+  .note input[type=number] { width:5rem; }
+  .note .unit { color:var(--dim); font-size:.85rem; }
+  .note button { padding:.3rem .6rem; }
+  .chime-foot { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; }
+
+  /* The colour preview: one drawing, repainted from the four pickers. */
+  .padwrap { display:flex; justify-content:center; padding:.4rem 0 .8rem; }
+  .padview { width:100%; max-width:15rem; height:auto; }
+  #chime-pick { width:auto; min-width:11rem; max-width:100%; }
+</style>
+
+<main>
+  <h1>Pair-Raught</h1>
+  <p class="sub">Settings save to the puck as you change them.</p>
+
+  <div class="bar">
+    <button id="connect" class="primary">Connect</button>
+    <button id="reload" disabled>Reload</button>
+    <button id="defaults" disabled>Restore defaults</button>
+    <span id="status" class="status">Not connected</span>
+  </div>
+
+  <div id="empty" class="empty">
+    Click <strong>Connect</strong> and choose the puck's serial port.<br>
+    Needs Chrome or Edge: Firefox and Safari cannot talk to serial devices.
+  </div>
+
+  <div id="panel" class="hide">
+    <section>
+      <h2>This puck</h2>
+      <p class="why">Refreshed every few seconds while this page is open.</p>
+      <dl class="facts">
+        <dt>USB mode</dt><dd id="f-mode">...</dd>
+        <dt>Controller</dt><dd id="f-controller">...</dd>
+        <dt>Console</dt><dd id="f-console">...</dd>
+        <dt>Motion calibration</dt><dd id="f-cal">...</dd>
+      </dl>
+      <div class="actions">
+        <button data-action="pair">Pair with a console</button>
+        <button data-action="usbmode" id="btn-usbmode">Switch USB mode</button>
+        <button data-action="reboot">Reboot</button>
+        <button data-action="factory">Factory reset</button>
+      </div>
+      <p class="why" style="margin:.8rem 0 0">Pairing reboots the puck into
+        Bluetooth pairing mode; then hold <strong>Change Grip/Order</strong> on
+        the console. Each of these restarts the puck, so this page disconnects
+        afterwards.</p>
+    </section>
+
+    <section>
+      <h2>Waking the console</h2>
+      <p class="why">Hold the QAM button, the three dots between the
+        trackpads, to wake a sleeping Switch. The puck borrows the radio,
+        wakes it, clears the lock screen, and hands the radio straight back.</p>
+      <div class="row">
+        <label>Enable waking<div class="hint">Off means the button does nothing</div></label>
+        <div class="ctl"><input type="checkbox" data-key="wake.enabled"></div>
+      </div>
+      <div class="row">
+        <label>Clear the lock screen<div class="hint">Off wakes the console but
+          leaves the lock screen up for you</div></label>
+        <div class="ctl"><input type="checkbox" data-key="wake.unlock"></div>
+      </div>
+      <div class="row">
+        <label>Play a sound<div class="hint">A short chime on the controller
+          before the puck hands the radio over</div></label>
+        <div class="ctl"><input type="checkbox" data-key="wake.sound"></div>
+      </div>
+      <div class="row">
+        <label>Hold time<div class="hint">ms, long enough not to trigger by accident</div></label>
+        <div class="ctl" data-slider="wake.hold_ms" data-step="50"></div>
+      </div>
+      <div class="row">
+        <label>Unlock button<div class="hint">The lock screen wants the SAME button several times</div></label>
+        <div class="ctl">
+          <select data-key="wake.button">
+            <option value="1">B</option>
+            <option value="2">0x0002 (probably A)</option>
+            <option value="4">0x0004 (probably X)</option>
+            <option value="8">0x0008 (probably Y)</option>
+            <option value="256">HOME</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <label>Presses<div class="hint">Three or four clears it</div></label>
+        <div class="ctl" data-slider="wake.presses"></div>
+      </div>
+      <div class="row">
+        <label>Give up after<div class="hint">Seconds, if the console never answers</div></label>
+        <div class="ctl" data-slider="wake.give_up_s"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Chimes</h2>
+      <p class="why">What the controller plays before a wake, and before the
+        puck reboots into another USB mode from the back 4 + L1 + R1 chord. Each
+        note plays on the right rumble motor unless you pick another haptic.
+        Unlike the other settings, notes only save when
+        you press <strong>Save</strong>. <strong>Preview</strong> plays what is
+        below without saving it, and needs the controller connected.</p>
+      <div class="row">
+        <label>Volume<div class="hint">Every chime. 100 is the loudest that played clean</div></label>
+        <div class="ctl" data-slider="chime.volume"></div>
+      </div>
+      <div class="row">
+        <label>Chime on mode switch<div class="hint">Off reboots straight away.
+          The wake chime is switched under Waking the console</div></label>
+        <div class="ctl"><input type="checkbox" data-key="chime.mode"></div>
+      </div>
+      <div class="row">
+        <label>Editing<div class="hint">Each chime keeps its own unsaved changes</div></label>
+        <div class="ctl"><select id="chime-pick"></select></div>
+      </div>
+      <div class="notes" id="chime-notes"></div>
+      <div class="chime-foot">
+        <button id="chime-add">Add note</button>
+        <button id="chime-rest">Add rest</button>
+        <span class="status" id="chime-info"></span>
+      </div>
+      <div class="actions">
+        <button id="chime-preview">Preview</button>
+        <button id="chime-save" class="primary">Save</button>
+        <button id="chime-revert">Undo changes</button>
+        <button id="chime-default">Default chime</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Wake timing</h2>
+      <p class="why">Counted in reports, roughly 30&nbsp;ms each. Pressing too
+        early achieves nothing: the console has woken, but the lock screen
+        is not up yet.</p>
+      <div class="row">
+        <label>Wait for the lock screen<div class="hint">60 is about 1.8 s</div></label>
+        <div class="ctl" data-slider="wake.delay"></div>
+      </div>
+      <div class="row">
+        <label>Press length<div class="hint">6 is about 180 ms</div></label>
+        <div class="ctl" data-slider="wake.press_time"></div>
+      </div>
+      <div class="row">
+        <label>Gap between presses<div class="hint">10 is about 300 ms</div></label>
+        <div class="ctl" data-slider="wake.gap"></div>
+      </div>
+      <div class="row">
+        <label>Hold before letting go<div class="hint">60 is about 1.8 s</div></label>
+        <div class="ctl" data-slider="wake.settle"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Extra buttons</h2>
+      <p class="why">The Pro Controller has no back paddles and no QAM button,
+        so each one can stand in for a button it does have. They ship unmapped,
+        because a button you rest a finger on is worse than one that does
+        nothing.</p>
+      <div class="row">
+        <label>Back paddle L4<div class="hint">Upper left</div></label>
+        <div class="ctl"><select data-key="map.l4" data-targets></select></div>
+      </div>
+      <div class="row">
+        <label>Back paddle R4<div class="hint">Upper right</div></label>
+        <div class="ctl"><select data-key="map.r4" data-targets></select></div>
+      </div>
+      <div class="row">
+        <label>Back paddle L5<div class="hint">Lower left</div></label>
+        <div class="ctl"><select data-key="map.l5" data-targets></select></div>
+      </div>
+      <div class="row">
+        <label>Back paddle R5<div class="hint">Lower right</div></label>
+        <div class="ctl"><select data-key="map.r5" data-targets></select></div>
+      </div>
+      <div class="row">
+        <label>QAM<div class="hint">Holding it still wakes the console</div></label>
+        <div class="ctl"><select data-key="map.qam" data-targets></select></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Colours</h2>
+      <p class="why">How the pad looks on the console's controller screen. The
+        console reads these once, during its handshake, so unplug and replug
+        the puck to see a change.</p>
+      <div class="padwrap">
+        <svg class="padview" viewBox="59.9 127.6 81.1 56.4" role="img"
+             aria-label="Preview of the colors on a controller">
+          <g stroke="var(--line)" stroke-width="0.45">
+            <path id="pv-grip-l" d="m 66.633026,139.45871 c -5.449541,12.38532 -5.201834,37.65138 -5.201834,37.65138 0,0 8.906307,10.60205 13.376146,1.98165 l 6.93578,-13.37615 c 0,0 -7.41342,-39.25154 -15.110092,-26.25688 z"/>
+            <path id="pv-grip-r" d="m 134.25956,139.48436 c 5.44955,12.38532 5.20184,37.65138 5.20184,37.65138 0,0 -8.90631,10.60205 -13.37615,1.98165 l -6.93578,-13.37615 c 0,0 7.41342,-39.25154 15.11009,-26.25688 z"/>
+            <path id="pv-body" d="m 82.527344,129.125 c -3.814871,-0.0938 -11.94604,0.85685 -15.957032,9.96289 -2.291285,5.20184 -2.228515,7.61719 -2.228515,7.61719 0,0 7.905667,14.97172 17.154297,19.6914 0.43073,0.21981 15.146424,-0.12503 18.810546,0.0254 3.66612,-0.0895 18.37427,0.49973 18.80859,0.28711 9.32582,-4.56528 17.47852,-19.40429 17.47852,-19.40429 0,0 0.10293,-2.41314 -2.10156,-7.65235 -5.14542,-12.22861 -17.85547,-10.08398 -17.85547,-10.08398 l -2.02344,2.44531 -6.4414,0.0156 -2.64454,-1.09571 -4.92382,-0.18554 -4.927739,0.10351 -2.662109,1.05274 -6.439453,-0.125 -1.982422,-2.47657 c 0,0 -0.79283,-0.14647 -2.064453,-0.17773 z"/>
+            <path class="pv-btn" d="m 117.29233,144.38187 c 0,1.62455 -1.38776,2.94151 -3.09966,2.94151 -1.71189,0 -3.09966,-1.31696 -3.09966,-2.94151 0,-1.62456 1.38777,-2.94152 3.09966,-2.94152 1.7119,0 3.09966,1.31696 3.09966,2.94152 z m 4.08716,0 c 0,1.62455 1.38776,2.94151 3.09966,2.94151 1.71189,0 3.09966,-1.31696 3.09966,-2.94151 0,-1.62456 -1.38777,-2.94152 -3.09966,-2.94152 -1.7119,0 -3.09966,1.31696 -3.09966,2.94152 z m -1.75263,-2.30712 c 1.62444,0.0192 2.9577,-1.35292 2.97792,-3.0647 0.0202,-1.71177 -1.28026,-3.115 -2.9047,-3.13419 -1.62444,-0.0192 -2.9577,1.35293 -2.97792,3.0647 -0.0202,1.71178 1.28026,3.115 2.9047,3.13419 z m -0.0483,4.08687 c 1.62444,0.0192 2.92491,1.42241 2.90469,3.13419 -0.0202,1.71177 -1.35348,3.08389 -2.97792,3.0647 -1.62444,-0.0192 -2.92491,-1.42241 -2.90469,-3.13419 0.0202,-1.71177 1.35348,-3.08389 2.97792,-3.0647 z"/>
+            <circle class="pv-btn" cx="78.770645" cy="144.84633" r="4.211009"/>
+            <circle class="pv-btn" cx="109.30046" cy="155.74541" r="4.211009"/>
+            <path class="pv-btn" d="m 42.251953,118.29492 -3.048828,0.0176 -0.111328,8.26953 -8.128906,0.0586 0.01563,2.98046 -0.01563,2.97852 8.128906,0.0586 0.111328,8.26953 3.048828,0.0176 3.048828,-0.0176 0.111328,-8.26953 8.128907,-0.0586 -0.01563,-2.97852 0.01563,-2.98046 -8.128907,-0.0586 -0.111328,-8.26953 z" transform="matrix(0.55005193,0,0,0.55005193,64.7704,84.858287)"/>
+          </g>
+        </svg>
+      </div>
+      <div class="row">
+        <label>Body</label>
+        <div class="ctl"><input type="color" data-color="color.body"></div>
+      </div>
+      <div class="row">
+        <label>Buttons</label>
+        <div class="ctl"><input type="color" data-color="color.buttons"></div>
+      </div>
+      <div class="row">
+        <label>Left grip</label>
+        <div class="ctl"><input type="color" data-color="color.gripl"></div>
+      </div>
+      <div class="row">
+        <label>Right grip</label>
+        <div class="ctl"><input type="color" data-color="color.gripr"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Trackpad mouse</h2>
+      <p class="why">The right trackpad moves a cursor. It tracks your thumb one
+        to one; gliding only happens after you flick and lift.</p>
+      <div class="row">
+        <label>Speed<div class="hint">Lower is faster</div></label>
+        <div class="ctl" data-slider="mouse.speed"></div>
+      </div>
+      <div class="row">
+        <label>Glide<div class="hint">% kept per step after you lift; 0 stops dead</div></label>
+        <div class="ctl" data-slider="mouse.glide"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Rumble and chords</h2>
+      <div class="row">
+        <label>Enable rumble<div class="hint">Off silences the controller entirely</div></label>
+        <div class="ctl"><input type="checkbox" data-key="rumble.enabled"></div>
+      </div>
+      <div class="row">
+        <label>Rumble strength<div class="hint">% of what the console asks for</div></label>
+        <div class="ctl" data-slider="rumble.strength"></div>
+      </div>
+      <div class="row">
+        <label>Chord hold<div class="hint">ms. Steam+Y powers off, back 4 + L1 + R1 switches mode</div></label>
+        <div class="ctl" data-slider="chord.hold_ms" data-step="50"></div>
+      </div>
+    </section>
+
+    <footer id="fw"></footer>
+  </div>
+</main>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const statusEl = $('#status');
+  let port = null, writer = null, buf = '', waiters = [];
+  let limits = {}, targets = [], poll = null, busy = false;
+
+  const setStatus = (msg, cls) => {
+    statusEl.textContent = msg;
+    statusEl.className = 'status ' + (cls || '');
+  };
+
+  /*
+   * The puck's console belongs to a running firmware that prints RF counters
+   * and heartbeats constantly, so replies are wrapped in markers and we fish
+   * them out of the stream rather than expecting the device to go quiet.
+   */
+  function feed(text) {
+    buf += text;
+    let i;
+    while ((i = buf.indexOf('CFG>>>')) !== -1) {
+      const start = buf.lastIndexOf('<<<CFG', i);
+      const body = start === -1 ? '' : buf.slice(start + 6, i);
+      buf = buf.slice(i + 6);
+      const w = waiters.shift();
+      if (w) { w(parse(body)); }
+    }
+    if (buf.length > 8192) { buf = buf.slice(-2048); }
+  }
+
+  /*
+   * Replies are key=value lines, but `field`, `target` and `note` repeat, so
+   * those go into a list instead of overwriting each other.
+   */
+  function parse(body) {
+    const out = { field: [], target: [], note: [] };
+    for (const line of body.split(/\r?\n/)) {
+      const m = line.match(/^\s*([a-z][\w.]*)=(.*)$/i);
+      if (!m) { continue; }
+      if (Array.isArray(out[m[1]])) { out[m[1]].push(m[2].trim()); }
+      else { out[m[1]] = m[2].trim(); }
+    }
+    return out;
+  }
+
+  /*
+   * One command at a time. Replies carry no request id and are matched to
+   * commands by order, so two in flight would pair each answer with the wrong
+   * question -- and stay wrong for the rest of the session.
+   */
+  async function send(cmd, timeoutMs) {
+    while (busy) { await new Promise(r => setTimeout(r, 20)); }
+    busy = true;
+    try {
+      return await new Promise((resolve, reject) => {
+        const onReply = v => { clearTimeout(t); resolve(v); };
+        const t = setTimeout(() => {
+          waiters = waiters.filter(w => w !== onReply);
+          reject(new Error('no reply from the puck'));
+        }, timeoutMs || 3000);
+        waiters.push(onReply);
+        writer.write(new TextEncoder().encode('$' + cmd + '\n')).catch(reject);
+      });
+    } finally {
+      busy = false;
+    }
+  }
+
+  /* --- controls the firmware describes ------------------------------------
+   *
+   * Ranges and mapping choices come from the puck, not from this file. A page
+   * carrying its own copy would go quietly wrong against a firmware that moved
+   * a limit, and the two are updated separately.
+   */
+  async function describe() {
+    const d = await send('fields');
+    limits = {};
+    for (const f of d.field) {
+      const [key, min, max] = f.split(',');
+      limits[key] = { min: +min, max: +max };
+    }
+    targets = d.target.map(t => {
+      const c = t.indexOf(',');
+      return { value: t.slice(0, c), name: t.slice(c + 1) };
+    });
+
+    for (const sel of document.querySelectorAll('select[data-targets]')) {
+      sel.innerHTML = '';
+      for (const t of targets) {
+        const o = document.createElement('option');
+        o.value = t.value;
+        o.textContent = t.name === 'none' ? 'Not mapped' : t.name.toUpperCase();
+        sel.appendChild(o);
+      }
+    }
+
+    for (const box of document.querySelectorAll('[data-slider]')) {
+      if (box.dataset.built) { continue; }
+      const key = box.dataset.slider;
+      const lim = limits[key] || { min: 0, max: 255 };
+      const step = box.dataset.step || 1;
+      box.innerHTML =
+        '<input type="range" min="' + lim.min + '" max="' + lim.max +
+        '" step="' + step + '">' +
+        '<input type="number" data-key="' + key + '" min="' + lim.min +
+        '" max="' + lim.max + '" step="' + step + '">';
+      const range = box.querySelector('input[type=range]');
+      const num = box.querySelector('input[type=number]');
+      /* The slider drives the number, and only the number talks to the puck,
+         so dragging does not fire a write per pixel. */
+      range.addEventListener('input', () => { num.value = range.value; });
+      range.addEventListener('change', () => {
+        num.value = range.value;
+        num.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      num.addEventListener('input', () => { range.value = num.value; });
+      box.dataset.built = '1';
+    }
+  }
+
+  /* --- values ------------------------------------------------------------ */
+
+  const hex2 = n => n.toString(16).padStart(2, '0');
+
+  async function load() {
+    const v = await send('get');
+    $('#empty').classList.add('hide');
+    $('#panel').classList.remove('hide');
+
+    for (const el of document.querySelectorAll('[data-key]')) {
+      const val = v[el.dataset.key];
+      if (val === undefined) { continue; }
+      if (el.type === 'checkbox') { el.checked = val !== '0'; }
+      else { el.value = val; }
+      if (el.type === 'number') {
+        const range = el.parentElement.querySelector('input[type=range]');
+        if (range) { range.value = val; }
+      }
+    }
+
+    for (const el of document.querySelectorAll('[data-color]')) {
+      const k = el.dataset.color;
+      if (v[k + '.r'] === undefined) { continue; }
+      el.value = '#' + hex2(+v[k + '.r']) + hex2(+v[k + '.g']) +
+                 hex2(+v[k + '.b']);
+    }
+
+    $('#fw').textContent = 'Settings format version ' + (v.version || '?') +
+                           ' · changes save immediately';
+    paintPad();
+    setStatus('Loaded', 'ok');
+  }
+
+  async function change(el) {
+    const key = el.dataset.key;
+    const val = el.type === 'checkbox' ? (el.checked ? 1 : 0) : el.value;
+    try {
+      const r = await send('set ' + key + ' ' + val);
+      if (r.error) {
+        /* The firmware validates ranges itself, so show its complaint and put
+           the control back to what the device actually holds. */
+        setStatus(r.error, 'bad');
+        await load();
+      } else {
+        setStatus('Saved ' + key, 'ok');
+      }
+    } catch (e) {
+      setStatus(String(e.message || e), 'bad');
+    }
+  }
+
+  /* A colour is three settings; send all three, then report once. */
+  async function changeColor(el) {
+    const k = el.dataset.color;
+    const m = el.value.match(/^#(..)(..)(..)$/);
+    if (!m) { return; }
+    try {
+      for (const [i, part] of ['r', 'g', 'b'].entries()) {
+        const r = await send('set ' + k + '.' + part + ' ' +
+                             parseInt(m[i + 1], 16));
+        if (r.error) { setStatus(r.error, 'bad'); return; }
+      }
+      setStatus('Saved ' + k + ' · replug the puck to see it', 'ok');
+    } catch (e) {
+      setStatus(String(e.message || e), 'bad');
+    }
+  }
+
+  /* --- chimes -------------------------------------------------------------
+   *
+   * The puck stores each note as Hz and ms; this edits note names. The chime
+   * names and the limits come from the puck, like the slider ranges, so the
+   * editor only offers what the firmware has and will take. Each chime keeps
+   * its own edits while you move between them, and nothing saves until Save.
+   */
+  const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const CHIME_LABELS = {
+    wake: 'Wake', dongle: 'To Steam dongle', pro: 'To Pro Controller',
+  };
+  const CHANNEL_LABELS = {
+    0: 'Left trackpad', 1: 'Right trackpad', 3: 'Left rumble', 4: 'Right rumble',
+  };
+  const channelLabel = h => CHANNEL_LABELS[h] || 'Haptic ' + h;
+  /* The puck lists its haptics default first; right rumble if it did not. */
+  const defaultChannel = () =>
+    (chimeLim && chimeLim.channels.length) ? chimeLim.channels[0] : 4;
+  let chimeLim = null, chimeCur = null;
+  const chimes = {};	/* name -> { saved, edit } */
+
+  /* MIDI note number to Hz, rounded the way the firmware stores it. A4 = 69. */
+  const midiHz = m => Math.round(440 * Math.pow(2, (m - 69) / 12));
+  const hzMidi = hz => Math.round(69 + 12 * Math.log2(hz / 440));
+  const noteName = m => NOTE_NAMES[m % 12] + (Math.floor(m / 12) - 1);
+  const noteHz = n => n.midi === null ? 0 : midiHz(n.midi);
+  const copyNotes = list => list.map(n => ({ midi: n.midi, ms: n.ms, ch: n.ch }));
+  const chimeLabel = name => CHIME_LABELS[name] || name;
+  const cur = () => chimes[chimeCur];
+  const isDirty = c => JSON.stringify(c.edit) !== JSON.stringify(c.saved);
+
+  function chimeFrom(name, r) {
+    chimeLim = {
+      maxNotes: +r.max_notes, hzMin: +r.hz_min, hzMax: +r.hz_max,
+      msMin: +r.ms_min, msMax: +r.ms_max, restMin: +r.rest_ms_min,
+      totalMax: +r.total_ms_max,
+      channels: (r.channels || '').split(',').filter(Boolean).map(Number),
+    };
+    const saved = r.note.map(line => {
+      const [hz, ms, ch] = line.split(',').map(Number);
+      return { midi: hz ? hzMidi(hz) : null, ms,
+               ch: hz && !isNaN(ch) ? ch : defaultChannel() };
+    });
+    chimes[name] = { saved, edit: copyNotes(saved) };
+    if (name === chimeCur) { renderChime(); }
+  }
+
+  async function loadChimes() {
+    const list = await send('chime names');
+    if (list.error || !list.names) {
+      setStatus(list.error || 'the puck listed no chimes', 'bad');
+      return;
+    }
+    const names = list.names.split(',');
+    for (const name of names) {
+      const r = await send('chime ' + name + ' get');
+      if (r.error) { setStatus(r.error, 'bad'); return; }
+      chimeFrom(name, r);
+    }
+
+    const pick = $('#chime-pick');
+    pick.innerHTML = '';
+    for (const name of names) {
+      const o = document.createElement('option');
+      o.value = name;
+      o.textContent = chimeLabel(name);
+      pick.appendChild(o);
+    }
+    if (!names.includes(chimeCur)) { chimeCur = names[0]; }
+    pick.value = chimeCur;
+    renderChime();
+  }
+
+  const chimeArgs = () => cur().edit.map(n => noteHz(n) + ':' + n.ms + ':' + n.ch).join(' ');
+
+  function chimeInfo() {
+    const list = cur().edit;
+    const total = list.reduce((t, n) => t + (+n.ms || 0), 0);
+    const info = $('#chime-info');
+    info.textContent = list.length + ' of ' + chimeLim.maxNotes + ' notes · ' +
+      (total / 1000).toFixed(2) + ' s' +
+      (total > chimeLim.totalMax
+        ? ' · over the ' + (chimeLim.totalMax / 1000) + ' s limit' : '') +
+      (isDirty(cur()) ? ' · not saved' : '');
+    info.className = 'status ' + (total > chimeLim.totalMax ? 'bad' : '');
+
+    /* Mark every chime with unsaved edits in the picker, so changes left on
+       another chime are not forgotten. */
+    for (const o of $('#chime-pick').options) {
+      const c = chimes[o.value];
+      o.textContent = chimeLabel(o.value) + (c && isDirty(c) ? ' (not saved)' : '');
+    }
+
+    const full = list.length >= chimeLim.maxNotes;
+    $('#chime-add').disabled = full;
+    $('#chime-rest').disabled = full;
+  }
+
+  function chimeButton(text, title, disabled, onclick) {
+    const b = document.createElement('button');
+    b.textContent = text;
+    b.title = title;
+    b.disabled = disabled;
+    b.onclick = onclick;
+    return b;
+  }
+
+  function renderChime() {
+    if (!chimeLim || !cur()) { return; }
+    const list = cur().edit;
+    const box = $('#chime-notes');
+    const playable = [];
+    for (let m = 0; m < 128; m++) {
+      const hz = midiHz(m);
+      if (hz >= chimeLim.hzMin && hz <= chimeLim.hzMax) { playable.push(m); }
+    }
+
+    box.innerHTML = '';
+    list.forEach((n, i) => {
+      const row = document.createElement('div');
+      row.className = 'note';
+
+      const idx = document.createElement('span');
+      idx.className = 'idx';
+      idx.textContent = (i + 1) + '.';
+      row.appendChild(idx);
+
+      const pick = document.createElement('select');
+      const hz = document.createElement('span');
+      hz.className = 'unit';
+      if (n.midi === null) {
+        pick.innerHTML = '<option>Rest</option>';
+        pick.disabled = true;
+      } else {
+        for (const m of playable) {
+          const o = document.createElement('option');
+          o.value = m;
+          o.textContent = noteName(m);
+          pick.appendChild(o);
+        }
+        pick.value = n.midi;
+        hz.textContent = midiHz(n.midi) + ' Hz';
+        pick.onchange = () => {
+          n.midi = +pick.value;
+          hz.textContent = midiHz(n.midi) + ' Hz';
+          chimeInfo();
+        };
+      }
+      row.appendChild(pick);
+
+      /* The haptic a note plays on. A rest has none: it silences whichever
+         haptic is playing. */
+      if (n.midi !== null) {
+        const chan = document.createElement('select');
+        chan.className = 'chan';
+        for (const h of chimeLim.channels) {
+          const o = document.createElement('option');
+          o.value = h;
+          o.textContent = channelLabel(h);
+          chan.appendChild(o);
+        }
+        chan.value = n.ch;
+        chan.onchange = () => { n.ch = +chan.value; chimeInfo(); };
+        row.appendChild(chan);
+      }
+
+      const ms = document.createElement('input');
+      ms.type = 'number';
+      ms.min = n.midi === null ? chimeLim.restMin : chimeLim.msMin;
+      ms.max = chimeLim.msMax;
+      ms.step = 10;
+      ms.value = n.ms;
+      ms.oninput = () => { n.ms = +ms.value; chimeInfo(); };
+      row.appendChild(ms);
+
+      const unit = document.createElement('span');
+      unit.className = 'unit';
+      unit.textContent = 'ms';
+      row.appendChild(unit);
+      row.appendChild(hz);
+
+      const move = (to) => {
+        list.splice(to, 0, list.splice(i, 1)[0]);
+        renderChime();
+      };
+      row.appendChild(chimeButton('↑', 'Move earlier', i === 0, () => move(i - 1)));
+      row.appendChild(chimeButton('↓', 'Move later', i === list.length - 1,
+                                  () => move(i + 1)));
+      row.appendChild(chimeButton('✕', 'Remove', list.length === 1, () => {
+        list.splice(i, 1);
+        renderChime();
+      }));
+
+      box.appendChild(row);
+    });
+    chimeInfo();
+  }
+
+  async function chimeCommand(cmd, okText) {
+    if (!writer) { return null; }
+    try {
+      const r = await send(cmd);
+      if (r.error) { setStatus(r.error, 'bad'); return null; }
+      setStatus(okText, 'ok');
+      return r;
+    } catch (e) {
+      setStatus(String(e.message || e), 'bad');
+      return null;
+    }
+  }
+
+  $('#chime-pick').onchange = () => {
+    chimeCur = $('#chime-pick').value;
+    renderChime();
+  };
+  $('#chime-add').onclick = () => {
+    if (!cur()) { return; }
+    const list = cur().edit;
+    const last = [...list].reverse().find(n => n.midi !== null);
+    list.push({ midi: last ? last.midi : 69, ms: 90, ch: defaultChannel() });
+    renderChime();
+  };
+  $('#chime-rest').onclick = () => {
+    if (!cur()) { return; }
+    cur().edit.push({ midi: null, ms: Math.max(chimeLim.restMin, 100),
+                      ch: defaultChannel() });
+    renderChime();
+  };
+  $('#chime-preview').onclick = () => {
+    if (!cur()) { return; }
+    chimeCommand('chime ' + chimeCur + ' test ' + chimeArgs(),
+                 'Playing on the controller');
+  };
+  $('#chime-save').onclick = async () => {
+    if (!cur()) { return; }
+    const name = chimeCur;
+    const r = await chimeCommand('chime ' + name + ' set ' + chimeArgs(),
+                                 'Saved the ' + chimeLabel(name) + ' chime');
+    if (r) { chimeFrom(name, r); }
+  };
+  $('#chime-revert').onclick = () => {
+    if (!cur()) { return; }
+    cur().edit = copyNotes(cur().saved);
+    renderChime();
+  };
+  $('#chime-default').onclick = async () => {
+    if (!cur()) { return; }
+    const name = chimeCur;
+    if (!confirm('Replace the ' + chimeLabel(name) + ' chime with its default ' +
+                 'and save it?')) { return; }
+    const r = await chimeCommand('chime ' + name + ' defaults',
+                                 'Restored the ' + chimeLabel(name) + ' chime');
+    if (r) { chimeFrom(name, r); }
+  };
+
+  /*
+   * The colour preview. The console draws its own icon from these four values,
+   * so this is a likeness rather than a copy of what it will show.
+   */
+  function paintPad() {
+    const pick = k => {
+      const el = document.querySelector('[data-color="' + k + '"]');
+      return el && el.value ? el.value : '#000000';
+    };
+    const body = $('#pv-body');
+    if (!body) { return; }
+    body.setAttribute('fill', pick('color.body'));
+    $('#pv-grip-l').setAttribute('fill', pick('color.gripl'));
+    $('#pv-grip-r').setAttribute('fill', pick('color.gripr'));
+    for (const el of document.querySelectorAll('.pv-btn')) {
+      el.setAttribute('fill', pick('color.buttons'));
+    }
+  }
+
+  /* Repaint while a picker is being dragged. Saving still waits for `change`,
+     so this does not write a setting per pixel. */
+  document.addEventListener('input', e => {
+    if (e.target && e.target.dataset && e.target.dataset.color) { paintPad(); }
+  });
+
+  /* --- status ------------------------------------------------------------ */
+
+  const dot = (on, text) =>
+    '<span class="dot ' + (on ? 'on' : 'off') + '"></span>' + text;
+
+  async function refreshStatus() {
+    let s;
+    try { s = await send('status'); }
+    catch (e) { return; }
+    if (s.error) { return; }
+
+    $('#f-mode').textContent = s.mode === 'pro'
+      ? 'Pro Controller (to a console)'
+      : 'Steam dongle (to a PC)';
+    $('#btn-usbmode').textContent = s.mode === 'pro'
+      ? 'Switch to dongle mode' : 'Switch to Pro Controller mode';
+
+    if (s.controller) {
+      $('#f-controller').innerHTML =
+        dot(s.controller_live === '1',
+            s.controller + (s.controller_live === '1'
+              ? ' (connected)' : ' (paired, not in range)'));
+    } else {
+      $('#f-controller').innerHTML = dot(false, 'None paired');
+    }
+
+    $('#f-console').innerHTML = s.console_paired === '1'
+      ? dot(true, 'Registered')
+      : dot(false, 'Not registered, so waking will not work');
+
+    const cal = +s.motion_cal || 0;
+    $('#f-cal').innerHTML = cal
+      ? dot(true, 'Stored (' + cal + ' bytes)')
+      : dot(false, 'None: calibrate from the console');
+  }
+
+  /* --- actions ------------------------------------------------------------
+   *
+   * Every action reboots the puck, which drops the serial port out from under
+   * us. Say so and disconnect deliberately, rather than leaving the page
+   * holding a dead handle.
+   */
+  async function doAction(what, confirmText) {
+    if (confirmText && !confirm(confirmText)) { return; }
+    try {
+      const r = await send('action ' + what, 2000);
+      if (r.error) { setStatus(r.error, 'bad'); return; }
+      setStatus(r.ok || 'done', 'ok');
+    } catch (e) {
+      /* A reboot arriving mid-reply is the expected case, not a failure. */
+    }
+    setTimeout(() => disconnect('Puck restarting, connect again'), 800);
+  }
+
+  /* --- connection --------------------------------------------------------- */
+
+  async function connect() {
+    try {
+      port = await navigator.serial.requestPort({});
+      await port.open({ baudRate: 115200 });
+      /* Without DTR asserted the puck ignores every byte, silently. */
+      await port.setSignals({ dataTerminalReady: true, requestToSend: true });
+
+      const dec = new TextDecoderStream();
+      port.readable.pipeTo(dec.writable).catch(() => {});
+      const reader = dec.readable.getReader();
+      (async () => {
+        for (;;) {
+          let r;
+          try { r = await reader.read(); } catch (e) { break; }
+          if (r.done) { break; }
+          if (r.value) { feed(r.value); }
+        }
+      })();
+
+      writer = port.writable.getWriter();
+      setStatus('Connected', 'ok');
+      $('#connect').textContent = 'Disconnect';
+      $('#reload').disabled = false;
+      $('#defaults').disabled = false;
+
+      await describe();
+      await load();
+      await loadChimes();
+      await refreshStatus();
+      poll = setInterval(() => { refreshStatus(); }, 4000);
+    } catch (e) {
+      setStatus(String(e.message || e), 'bad');
+    }
+  }
+
+  async function disconnect(msg) {
+    if (poll) { clearInterval(poll); poll = null; }
+    waiters = [];
+    buf = '';
+    if (port) {
+      try { writer.releaseLock(); } catch (e) {}
+      try { await port.close(); } catch (e) {}
+    }
+    port = null; writer = null;
+    $('#connect').textContent = 'Connect';
+    $('#reload').disabled = true;
+    $('#defaults').disabled = true;
+    $('#panel').classList.add('hide');
+    $('#empty').classList.remove('hide');
+    setStatus(msg || 'Not connected');
+  }
+
+  document.addEventListener('change', e => {
+    const el = e.target;
+    if (!el || !el.dataset || !writer) { return; }
+    if (el.dataset.key) { change(el); }
+    else if (el.dataset.color) { changeColor(el); }
+  });
+
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-action]');
+    if (!b || !writer) { return; }
+    const what = b.dataset.action;
+    const ask = {
+      pair: 'Reboot into pairing mode and register with a console?',
+      usbmode: 'Switch USB mode and reboot?',
+      reboot: 'Reboot the puck?',
+      factory: 'Erase everything the puck remembers?\n\nThe paired controller, the ' +
+               'registered console, all settings and the motion calibration. ' +
+               'You will have to pair again from scratch.',
+    }[what];
+    doAction(what, ask);
+  });
+
+  $('#connect').onclick = () => { port ? disconnect() : connect(); };
+
+  $('#reload').onclick = () =>
+    load().then(loadChimes).catch(e => setStatus(String(e.message || e), 'bad'));
+
+  $('#defaults').onclick = async () => {
+    if (!confirm('Restore every setting to its default?')) { return; }
+    try { await send('defaults'); await load(); }
+    catch (e) { setStatus(String(e.message || e), 'bad'); }
+  };
+
+  if (!('serial' in navigator)) {
+    $('#empty').innerHTML =
+      'This browser cannot talk to serial devices.<br>Use Chrome or Edge.';
+    $('#connect').disabled = true;
+  }
+})();
+</script>

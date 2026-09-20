@@ -1,0 +1,118 @@
+/*
+ * Select Zephyr's open software link layer instead of Nordic's SoftDevice
+ * Controller.
+ *
+ * nrf52840.dtsi ships with:
+ *     chosen { zephyr,bt-hci = &bt_hci_sdc; }
+ *     bt_hci_sdc        (nordic,bt-hci-sdc)         status = "okay"
+ *     bt_hci_controller (zephyr,bt-hci-ll-sw-split) status = "disabled"
+ *
+ * The SDC is a binary blob, so its 7.5 ms connection-interval floor cannot be
+ * relaxed. The software controller is source we can patch, which is the entire
+ * reason for this port.
+ */
+
+/ {
+	chosen {
+		zephyr,bt-hci = &bt_hci_controller;
+	};
+};
+
+&bt_hci_sdc {
+	status = "disabled";
+};
+
+&bt_hci_controller {
+	status = "okay";
+};
+
+/*
+ * The Valve dongle's four HID interfaces.
+ *
+ * A real Steam Controller dongle exposes ONE HID interface per bond slot, and
+ * Steam treats each as an independent controller -- interface N owns slot N.
+ * That is also how pairing happens: Steam drives the control channel over
+ * feature reports (report IDs 0x01/0x02, 63 bytes) on these interfaces, and the
+ * resulting bond record is what the RF layer later beacons for. There is no
+ * over-the-air pairing, so without these four interfaces no controller can ever
+ * be bonded.
+ *
+ * in-report-size 64 covers the largest input report in PUCK_HID_DESC (0x45 is
+ * 0x2D=45 bytes, plus the report ID). 1 ms polling matches the dongle, which
+ * Steam's input path expects.
+ */
+/ {
+	hid_slot_0: hid_slot_0 {
+		compatible = "zephyr,hid-device";
+		label = "Steam Controller Puck 0";
+		protocol-code = "none";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+	};
+
+	hid_slot_1: hid_slot_1 {
+		compatible = "zephyr,hid-device";
+		label = "Steam Controller Puck 1";
+		protocol-code = "none";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+	};
+
+	hid_slot_2: hid_slot_2 {
+		compatible = "zephyr,hid-device";
+		label = "Steam Controller Puck 2";
+		protocol-code = "none";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+	};
+
+	hid_slot_3: hid_slot_3 {
+		compatible = "zephyr,hid-device";
+		label = "Steam Controller Puck 3";
+		protocol-code = "none";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+	};
+
+	/*
+	 * The Pro Controller interface, used INSTEAD of the four above when the
+	 * puck boots in Pro Controller mode.
+	 *
+	 * It needs an interrupt OUT endpoint, which the Steam interfaces do not
+	 * have: the console sends its handshake and subcommands (reports 0x01,
+	 * 0x10, 0x80) on the OUT pipe, and without one they would only ever
+	 * arrive as control-pipe SET_REPORTs -- which is not where a real Pro
+	 * Controller receives them.
+	 *
+	 * 1 ms polling matches what the Arduino build sets (setPollInterval(1)).
+	 */
+	hid_pro: hid_pro {
+		compatible = "zephyr,hid-device";
+		label = "Pro Controller";
+		protocol-code = "none";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+		out-report-size = <64>;
+		out-polling-period-us = <1000>;
+	};
+
+	/*
+	 * A plain boot-protocol MOUSE, carried alongside the Pro Controller.
+	 *
+	 * The Switch 2 supports USB mice, so the trackpads can drive one -- but
+	 * whether the console still binds a Pro Controller that has a mouse
+	 * sitting beside it is UNKNOWN. Adding an interface to a working device
+	 * is exactly what COMBO did, and Steam misbehaved with it. A console has
+	 * no reason to claim a mouse the way Steam claimed a gamepad, but that
+	 * was true of Steam too until it was tried.
+	 *
+	 * 4-byte report: buttons, dx, dy, wheel.
+	 */
+	hid_mouse: hid_mouse {
+		compatible = "zephyr,hid-device";
+		label = "Pair-Raught Mouse";
+		protocol-code = "mouse";
+		in-report-size = <4>;
+		in-polling-period-us = <8000>;
+	};
+};
