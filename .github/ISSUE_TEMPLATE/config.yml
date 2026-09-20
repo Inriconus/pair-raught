@@ -1,0 +1,12 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Before you flash, check the SoftDevice
+    url: https://github.com/Inriconus/pair-raught#before-you-flash-check-the-softdevice
+    about: >
+      A board that looks dead after flashing is almost always a missing SoftDevice
+      or a charge-only cable. This section says how to tell and how to fix it.
+  - name: How the puck is set up
+    url: https://github.com/Inriconus/pair-raught#setting-up
+    about: >
+      Pairing a controller through Steam, registering with a console, and what the
+      chords do.

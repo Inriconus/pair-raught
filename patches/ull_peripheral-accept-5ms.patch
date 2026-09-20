@@ -1,0 +1,137 @@
+diff --git a/subsys/bluetooth/controller/ll_sw/lll.h b/subsys/bluetooth/controller/ll_sw/lll.h
+index f35589af6fc..5464d790040 100644
+--- a/subsys/bluetooth/controller/ll_sw/lll.h
++++ b/subsys/bluetooth/controller/ll_sw/lll.h
+@@ -21,6 +21,25 @@
+ #define PERIODIC_INT_UNIT_US     CONN_INT_UNIT_US
+ #define CONN_LOW_LAT_INT_UNIT_US 500U
+ 
++/*
++ * Pair-Raught: the Nintendo Switch 2 opens controller connections with a
++ * CONNECT_IND carrying interval=4 (4 x 1250 us = 5.00 ms), below the Bluetooth
++ * spec floor BT_HCI_LE_INTERVAL_MIN (6 units = 7.5 ms). ull_peripheral.c is
++ * patched to accept it.
++ *
++ * This threshold has to move with it, because the controller ALSO uses "below
++ * the spec floor" to select the proprietary LOW LATENCY encoding, in which the
++ * interval means (interval + 1) * CONN_LOW_LAT_INT_UNIT_US. For interval=4 that
++ * is 5 * 500 = 2500 us -- exactly HALF what the Switch means. Accepting the
++ * connection without also moving this made the puck anchor at 2.5 ms against a
++ * console at 5 ms; the link then died within a few seconds with reason 0x1e
++ * (invalid LL parameters), reproducibly.
++ *
++ * So the standard 1250 us units must apply from 4 upwards. Used in ull_conn.c
++ * everywhere a connection interval is converted to microseconds.
++ */
++#define RAUGHT_LE_INTERVAL_MIN 4U
++
+ #define ISO_INTERVAL_TO_US(interval) ((interval) * ISO_INT_UNIT_US)
+ 
+ /* Timeout for Host to accept/reject cis create request */
+diff --git a/subsys/bluetooth/controller/ll_sw/ull_conn.c b/subsys/bluetooth/controller/ll_sw/ull_conn.c
+index 1c1f7d598ab..6a035fa3621 100644
+--- a/subsys/bluetooth/controller/ll_sw/ull_conn.c
++++ b/subsys/bluetooth/controller/ll_sw/ull_conn.c
+@@ -718,7 +718,7 @@ uint8_t ll_apto_get(uint16_t handle, uint16_t *apto)
+ 		return BT_HCI_ERR_UNKNOWN_CONN_ID;
+ 	}
+ 
+-	if (conn->lll.interval >= BT_HCI_LE_INTERVAL_MIN) {
++	if (conn->lll.interval >= RAUGHT_LE_INTERVAL_MIN) {
+ 		*apto = conn->apto_reload * conn->lll.interval *
+ 			CONN_INT_UNIT_US / (10U * USEC_PER_MSEC);
+ 	} else {
+@@ -744,7 +744,7 @@ uint8_t ll_apto_set(uint16_t handle, uint16_t apto)
+ 		return BT_HCI_ERR_UNKNOWN_CONN_ID;
+ 	}
+ 
+-	if (conn->lll.interval >= BT_HCI_LE_INTERVAL_MIN) {
++	if (conn->lll.interval >= RAUGHT_LE_INTERVAL_MIN) {
+ 		conn->apto_reload =
+ 			RADIO_CONN_EVENTS(apto * 10U * USEC_PER_MSEC,
+ 					  conn->lll.interval *
+@@ -1160,7 +1160,7 @@ void ull_conn_done(struct node_rx_event_done *done)
+ 		if (!conn->supervision_expire) {
+ 			uint32_t conn_interval_us;
+ 
+-			if (conn->lll.interval >= BT_HCI_LE_INTERVAL_MIN) {
++			if (conn->lll.interval >= RAUGHT_LE_INTERVAL_MIN) {
+ 				conn_interval_us = conn->lll.interval *
+ 						   CONN_INT_UNIT_US;
+ 			} else {
+@@ -2362,7 +2362,7 @@ void ull_conn_update_parameters(struct ll_conn *conn, uint8_t is_cu_proc, uint8_
+ #endif
+ 
+ 	/* compensate for instant_latency due to laziness */
+-	if (lll->interval >= BT_HCI_LE_INTERVAL_MIN) {
++	if (lll->interval >= RAUGHT_LE_INTERVAL_MIN) {
+ 		conn_interval_old = instant_latency * lll->interval;
+ 		conn_interval_unit_old = CONN_INT_UNIT_US;
+ 	} else {
+@@ -2370,7 +2370,7 @@ void ull_conn_update_parameters(struct ll_conn *conn, uint8_t is_cu_proc, uint8_
+ 		conn_interval_unit_old = CONN_LOW_LAT_INT_UNIT_US;
+ 	}
+ 
+-	if (interval >= BT_HCI_LE_INTERVAL_MIN) {
++	if (interval >= RAUGHT_LE_INTERVAL_MIN) {
+ 		uint16_t max_tx_time;
+ 		uint16_t max_rx_time;
+ 		uint32_t slot_us;
+@@ -2559,7 +2559,7 @@ void ull_conn_update_peer_sca(struct ll_conn *conn)
+ 	lll = &conn->lll;
+ 
+ 	/* calculate the window widening and interval */
+-	if (lll->interval >= BT_HCI_LE_INTERVAL_MIN) {
++	if (lll->interval >= RAUGHT_LE_INTERVAL_MIN) {
+ 		conn_interval_us = lll->interval *
+ 				   CONN_INT_UNIT_US;
+ 	} else {
+diff --git a/subsys/bluetooth/controller/ll_sw/ull_peripheral.c b/subsys/bluetooth/controller/ll_sw/ull_peripheral.c
+index aa6db211ed1..404edc23ae8 100644
+--- a/subsys/bluetooth/controller/ll_sw/ull_peripheral.c
++++ b/subsys/bluetooth/controller/ll_sw/ull_peripheral.c
+@@ -60,6 +60,15 @@
+ 
+ #include "hal/debug.h"
+ 
++/*
++ * Pair-Raught: RAUGHT_LE_INTERVAL_MIN (the lowest connection interval accepted
++ * in a CONNECT_IND, in 1.25 ms units) now lives in lll.h, because ull_conn.c
++ * needs the SAME threshold to pick the right time unit when converting the
++ * interval to microseconds. Defining it in two places let the two disagree:
++ * this file accepted interval=4 while ull_conn.c still treated anything under 6
++ * as the low-latency encoding and ran the link at 2.5 ms instead of 5 ms.
++ */
++
+ static void invalid_release(struct ull_hdr *hdr, struct lll_conn *lll,
+ 			    memq_link_t *link, struct node_rx_pdu *rx);
+ static void ticker_op_stop_adv_cb(uint32_t status, void *param);
+@@ -157,10 +166,27 @@ void ull_periph_setup(struct node_rx_pdu *rx, struct node_rx_ftr *ftr,
+ 			       sizeof(lll->data_chan_map));
+ 	lll->data_chan_hop = pdu_adv->connect_ind.hop;
+ 	lll->interval = sys_le16_to_cpu(pdu_adv->connect_ind.interval);
++	/*
++	 * Pair-Raught: accept connection intervals below the 7.5 ms (6 unit) floor
++	 * that BT_HCI_LE_INTERVAL_MIN encodes.
++	 *
++	 * The Nintendo Switch 2 opens controller connections with interval=4
++	 * (5.00 ms), which is out of spec. Nintendo's own controllers accept it:
++	 * a real Joy-Con's reconnect CONNECT_IND is also interval=4 and the link
++	 * runs for minutes. Rejecting it here is silent and total -- the
++	 * peripheral never transmits, so the central sees a device that simply
++	 * does not answer. Measured on air 2026-08-15 with the S140 SoftDevice,
++	 * which enforces the same rule where it cannot be reached: 213
++	 * CONNECT_INDs at interval=4 all unanswered, versus the single
++	 * interval=12 (15 ms) offer that connected and ran for 33 s.
++	 *
++	 * This is deliberately NOT spec compliant. It is the entire reason this
++	 * project uses Zephyr's software controller rather than a binary one.
++	 */
+ 	if ((lll->data_chan_count < CHM_USED_COUNT_MIN) ||
+ 	    (lll->data_chan_hop < CHM_HOP_COUNT_MIN) ||
+ 	    (lll->data_chan_hop > CHM_HOP_COUNT_MAX) ||
+-	    !IN_RANGE(lll->interval, BT_HCI_LE_INTERVAL_MIN, BT_HCI_LE_INTERVAL_MAX)) {
++	    !IN_RANGE(lll->interval, RAUGHT_LE_INTERVAL_MIN, BT_HCI_LE_INTERVAL_MAX)) {
+ 		invalid_release(&adv->ull, lll, link, rx);
+ 
+ 		return;

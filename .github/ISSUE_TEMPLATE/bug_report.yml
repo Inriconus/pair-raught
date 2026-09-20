@@ -1,0 +1,84 @@
+name: Something is not working
+description: A puck that does not behave the way the README says it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Three things account for most reports, so they are worth ruling out first:
+
+        - The board's bootloader drive says `SoftDevice: S140 version 6.1.1`. If it says
+          "not found", the firmware lands in the wrong place and the board looks dead.
+        - The USB cable carries data. Plenty sold with small electronics do not.
+        - A locally built image had the link-layer patch in `patches/` applied to the SDK.
+          Without it the console never finishes connecting.
+
+        The puck's serial console prints what it is doing, and it usually answers the
+        question on its own. Open it in any terminal and press `?` for the key list.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: What you did, what the puck did, and what you expected instead.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Firmware
+      description: A release tag, or the commit you built.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: source
+    attributes:
+      label: Where the firmware came from
+      options:
+        - A release download
+        - Built locally, with the link-layer patch applied
+        - Built locally, without the patch or not sure
+    validations:
+      required: true
+
+  - type: input
+    id: softdevice
+    attributes:
+      label: SoftDevice line
+      description: The `SoftDevice:` line from `INFO_UF2.TXT` on the bootloader drive.
+      placeholder: "SoftDevice: S140 version 6.1.1"
+    validations:
+      required: true
+
+  - type: input
+    id: board
+    attributes:
+      label: Board
+      description: Which nRF52840 board, and where it came from if it is not the one in the README.
+      placeholder: nRF52840 Pro Micro
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: USB mode at the time
+      options:
+        - Pro Controller, plugged into a console
+        - Pro Controller, plugged into a PC
+        - Steam dongle
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: >
+        Whatever the puck printed around the problem. The `s` key dumps the RF link
+        and USB state, and `c` dumps the settings.
+      render: text
